@@ -1,0 +1,15 @@
+pandas
+numpy
+scikit-learn
+nltk
+Sastrawi
+matplotlib
+seaborn
+wordcloud
+streamlit
+plotly
+joblib
+google-api-python-client
+fpdf2
+networkx
+apify-client
