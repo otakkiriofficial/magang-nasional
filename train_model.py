@@ -25,11 +25,10 @@ MODEL_DIR = 'models'
 
 def pelabelan_otomatis(skor_array):
     """Melabeli dataset murni berdasarkan skor mutlak menggunakan np.select."""
-    skor_array = np.array(skor_array) # Pastikan formatnya numpy array
+    skor_array = np.array(skor_array) 
     kondisi = [skor_array > 0, skor_array < 0]
     pilihan = ['positif', 'negatif']
     
-    # Jika tidak memenuhi kedua kondisi di atas, jadikan 'netral'
     return np.select(kondisi, pilihan, default='netral')
 
 def run_training_process():
@@ -46,7 +45,7 @@ def run_training_process():
         df = pd.read_csv(DATA_PATH).dropna(subset=['textDisplay']).reset_index(drop=True)
         
         st.write("🧹 Membersihkan Teks (Cleansing + Stopwords + Stemming)...")
-        progress_bar.progress(20, text="Tahap 2/8: Preprocessing Teks (Ini memakan waktu, mohon tunggu)...")
+        progress_bar.progress(20, text="Tahap 2/8: Preprocessing Teks...")
         if 'clean_text' not in df.columns:
             df = run_preprocessing_pipeline(df, text_column='textDisplay')
 
@@ -56,25 +55,21 @@ def run_training_process():
         skor_leksikon = np.array([hitung_skor_leksikon(t, lexicon) for t in df['clean_text']]).reshape(-1, 1)
 
         st.write("🏷️ Melakukan Pelabelan Sentimen...")
-        progress_bar.progress(50, text="Tahap 4/8: Pelabelan Otomatis (Termasuk Netral)...")
-        # Semua data digunakan (Multikelas: Positif, Negatif, Netral)
+        progress_bar.progress(50, text="Tahap 4/8: Pelabelan Otomatis...")
         y = pelabelan_otomatis(skor_leksikon.flatten())
         df['label_sentimen'] = y
         
         X_text = df['clean_text']
         st.write(f"📊 Distribusi Dataset Awal: {pd.Series(y).value_counts().to_dict()}")
 
-        # Filter out classes with fewer than 2 members
+        # Filter kelas yang kurang dari 2
         valid_indices = df.groupby('label_sentimen').filter(lambda x: len(x) >= 2).index
-        
-        # Apply the filter to all variables
         X_text_filtered = df.loc[valid_indices, 'clean_text']
         skor_leksikon_filtered = skor_leksikon[valid_indices]
         y_filtered = y[valid_indices]
         
-        # Menghitung jumlah kelas yang valid secara dinamis (Bug Fix)
         jumlah_kelas_valid = len(np.unique(y_filtered))
-        st.write(f"📊 Distribusi Setelah Filter (<2 dibuang): {pd.Series(y_filtered).value_counts().to_dict()}")
+        st.write(f"📊 Distribusi Setelah Filter: {pd.Series(y_filtered).value_counts().to_dict()}")
 
         st.write("✂️ Pemisahan Data Training & Testing (Test Size: 30%)...")
         X_tr_text, X_te_text, lex_tr, lex_te, y_tr, y_te = train_test_split(
@@ -82,8 +77,7 @@ def run_training_process():
         )
 
         st.write("📐 Mengekstrak Fitur TF-IDF...")
-        progress_bar.progress(70, text="Tahap 5/8: Vektorisasi TF-IDF & Normalisasi Leksikon...")
-        # Menggunakan TfidfVectorizer utuh tanpa batas max_features
+        progress_bar.progress(70, text="Tahap 5/8: Vektorisasi TF-IDF...")
         vectorizer = TfidfVectorizer()
         X_tr_tfidf = vectorizer.fit_transform(X_tr_text)
         X_te_tfidf = vectorizer.transform(X_te_text)
@@ -107,47 +101,71 @@ def run_training_process():
         y_pred = model.predict(X_te_final)
         acc = metrics.accuracy_score(y_te, y_pred)
         
-        # Tampilan Akurasi Dinamis
         st.success(f"🎯 **Akurasi Model Gabungan ({jumlah_kelas_valid} Kelas): {acc * 100:.2f}%**")
         
         st.write("📋 **Laporan Metrik:**")
         st.dataframe(pd.DataFrame(metrics.classification_report(y_te, y_pred, output_dict=True)).T.round(3))
 
         # =====================================================================
-        # MODUL TRANSPARANSI UNTUK DOSEN (WHITE-BOX EXPLANATION)
+        # MODUL TRANSPARANSI UNTUK DOSEN (WHITE-BOX EXPLANATION + CONTOH KASUS)
         # =====================================================================
         st.markdown("---")
-        st.markdown("### 🎓 Detail Perhitungan & Step-by-Step (Validasi Dosen)")
+        st.markdown("### 🎓 Detail Perhitungan, Rumus & Contoh Kasus ")
         
         with st.expander("1. Cleansing, Stopwords & Pelabelan Leksikon", expanded=False):
-            st.write("**Proses NLP Pipeline:** Membersihkan tanda baca (cleansing), menghapus kata tak berbobot (stopwords), dan mengembalikan kata ke bentuk dasar (stemming).")
             st.latex(r"Skor\_Total = \sum_{i=1}^{n} bobot(kata_i)")
-            st.write("Setiap kata dalam kalimat dicocokkan dengan kamus leksikon. Sistem menjumlahkan bobotnya:")
-            st.markdown("- Jika **Skor > 0** ➔ Positif\n- Jika **Skor < 0** ➔ Negatif\n- Jika **Skor = 0** ➔ Netral")
-            st.write("**Sampel Data & Perhitungan Leksikon:**")
-            st.dataframe(pd.DataFrame({
-                'Teks Bersih': X_text_filtered.head(3).values, 
-                'Skor Leksikon Awal': skor_leksikon_filtered.flatten()[:3],
-                'Label Aktual': y_filtered[:3]
-            }))
+            st.write("Teks dibersihkan, lalu setiap kata dicocokkan dengan kamus leksikon untuk diakumulasikan skornya (Positif jika > 0, Negatif jika < 0).")
+            
+            st.info("""
+            **💡 Contoh Kasus Simulasi:**
+            *   **Teks Asli:** "Aplikasi ini SANGAT lemot dan jelek sekali! 😡"
+            *   **Hasil Cleansing & Stopword:** "aplikasi lemot jelek"
+            *   **Perhitungan Kamus:** Misal di kamus leksikon, 'lemot' = -3, 'jelek' = -4. 
+                *   Skor Total = (-3) + (-4) = **-7**
+            *   **Kesimpulan:** Karena -7 < 0, teks dilabeli otomatis sebagai **Negatif**.
+            """)
 
         with st.expander("2. TF-IDF & Normalisasi MinMaxScaler", expanded=False):
-            st.write("**A. Ekstraksi Fitur Teks (TF-IDF)**")
-            st.latex(r"w_{i,j} = TF_{i,j} \times \log\left(\frac{N}{DF_i}\right)")
-            st.write(f"Mengubah teks menjadi matriks angka. Saat ini terdapat **{X_tr_tfidf.shape[0]} Dokumen Latih (N)** dan **{X_tr_tfidf.shape[1]} Kosakata Unik**.")
+            st.latex(r"TF_{i,j} = \frac{f_{i,j}}{\sum f} \quad | \quad IDF_i = \log\left(\frac{N}{DF_i}\right) \quad | \quad X_{norm} = \frac{X - X_{min}}{X_{max} - X_{min}}")
+            st.write("Mengubah kata menjadi vektor bobot (TF-IDF), dan menstandarkan skor leksikon (0 hingga 1) agar tidak mendominasi TF-IDF saat digabungkan.")
             
-            st.write("**B. Normalisasi Leksikon**")
-            st.latex(r"X_{norm} = \frac{X - X_{min}}{X_{max} - X_{min}}")
-            st.write("Skor leksikon (bisa bernilai puluhan) diskala ulang menjadi 0.0 hingga 1.0 agar setara dengan nilai TF-IDF sebelum digabungkan *(hstack)*.")
+            st.info("""
+            **💡 Contoh Kasus Simulasi:**
+            *   **TF-IDF (Kata 'jelek'):**
+                *   Dari kalimat "aplikasi lemot jelek" (3 kata), 'jelek' muncul 1 kali. TF = 1/3 = **0.33**.
+                *   Misal total ada 14 dokumen (N), dan kata 'jelek' muncul di 2 dokumen (DF). IDF = log(14/2) = **0.84**.
+                *   Bobot Matriks TF-IDF untuk 'jelek' = 0.33 * 0.84 = **0.27**.
+            *   **MinMaxScaler (Skor Leksikon):**
+                *   Misal skor leksikon terendah di dataset latih = -10 (Min), tertinggi = +15 (Max).
+                *   Skor kalimat kita = -7. Normalisasi = (-7 - (-10)) / (15 - (-10)) = 3 / 25 = **0.12**.
+                *   *Nilai 0.12 ini yang digabungkan (hstack) dengan bobot 0.27 di atas.*
+            """)
 
         with st.expander("3. Algoritma Multinomial Naive Bayes", expanded=False):
-            st.write("Algoritma menghitung probabilitas sebuah teks masuk ke kelas tertentu berdasarkan kemunculan fitur-fiturnya (Probabilitas Bersyarat / Teorema Bayes).")
             st.latex(r"P(Kelas|Teks) \propto P(Kelas) \prod_{i=1}^{n} P(Fitur_i|Kelas)")
-            st.write("**Keterangan:**")
-            st.markdown("- **$P(Kelas)$**: Probabilitas Prior (Distribusi kelas pada data latih).\n- **$P(Fitur_i|Kelas)$**: Likelihood (Peluang kemunculan kata/fitur pada kelas tertentu).\n- Model ini menggunakan *Laplace Smoothing* ($\\alpha = 1$) untuk mencegah probabilitas nol jika ada kata baru di data uji.")
+            st.write("Algoritma menghitung Probabilitas Prior (bobot awal kelas) dikali Probabilitas Likelihood (peluang kata muncul di kelas tersebut).")
+            
+            st.info("""
+            **💡 Contoh Kasus Simulasi:**
+            *   Misal data latih kita: 8 Negatif, 6 Positif (Total 14).
+            *   **Probabilitas Prior:** $P(Neg) = 8/14 = 0.57$ | $P(Pos) = 6/14 = 0.42$.
+            *   **Likelihood:** Misal dari data latih, peluang muncul kata 'jelek' di kelas Negatif adalah 0.30, sedangkan di Positif hanya 0.01.
+            *   **Kalkulasi Probabilitas Akhir:**
+                *   Skor Kelas Negatif = P(Neg) * Likelihood = 0.57 * 0.30 = **0.171**
+                *   Skor Kelas Positif = P(Pos) * Likelihood = 0.42 * 0.01 = **0.004**
+            *   **Kesimpulan:** Karena 0.171 > 0.004, Naive Bayes akan menebak kalimat tersebut sebagai **Negatif**.
+            """)
 
         with st.expander("4. Pemahaman Laporan Metrik (Classification Report)", expanded=False):
-            st.markdown("- **Akurasi**: Persentase total tebakan benar dari seluruh data uji.\n- **Precision**: Fokus meminimalkan *False Positive*. (Dari semua yang ditebak Positif, berapa yang *benar-benar* Positif?).\n- **Recall**: Fokus meminimalkan *False Negative*. (Dari semua data yang *sebenarnya* Positif, berapa persen yang berhasil ditebak model?).\n- **F1-Score**: Nilai rata-rata harmonis dari Precision dan Recall.")
+            st.write("Metrik mengevaluasi keakuratan tebakan model pada data uji yang tidak pernah ia lihat sebelumnya.")
+            
+            st.info("""
+            **💡 Contoh Kasus Simulasi (Confusion Matrix Dasar):**
+            *   **Precision:** Model menebak ada 10 komentar Positif. Setelah diverifikasi manual, ternyata hanya 8 yang benar-benar Positif, sisanya 2 salah (False Positive). 
+                *   *Precision* = 8 / 10 = **80%**.
+            *   **Recall:** Di dalam dataset uji, sebenarnya terdapat 10 komentar Positif. Tapi model hanya berhasil mendeteksi 6 (4 komentar Positif lainnya luput/False Negative). 
+                *   *Recall* = 6 / 10 = **60%**.
+            """)
         # =====================================================================
 
         st.write("💾 Menyimpan Komponen Model...")
@@ -162,7 +180,6 @@ def run_training_process():
     st.success("🎉 Proses ekstraksi dan pelatihan berhasil dituntaskan. Modul Prediksi dan Analisis sekarang siap digunakan.")
 
 def show_training_page():
-    # Header yang disesuaikan dengan UI yang profesional
     st.markdown("""
         <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 5px solid #1B4965; margin-bottom: 25px">
             <h2 style="color: #1B4965; margin: 0;">⚙️ Pelatihan Model Sentimen</h2>
@@ -180,6 +197,5 @@ def show_training_page():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Tombol eksekusi yang dibuat lebih lebar dan menonjol
     if st.button("🚀 Mulai Kalibrasi & Pelatihan Model", type="primary", use_container_width=True):
         run_training_process()
