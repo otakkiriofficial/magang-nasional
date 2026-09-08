@@ -62,7 +62,7 @@ def run_training_process():
         df['label_sentimen'] = y
         
         X_text = df['clean_text']
-        st.write(f"📊 Distribusi Dataset (3 Kelas): {pd.Series(y).value_counts().to_dict()}")
+        st.write(f"📊 Distribusi Dataset Awal: {pd.Series(y).value_counts().to_dict()}")
 
         # Filter out classes with fewer than 2 members
         valid_indices = df.groupby('label_sentimen').filter(lambda x: len(x) >= 2).index
@@ -71,6 +71,10 @@ def run_training_process():
         X_text_filtered = df.loc[valid_indices, 'clean_text']
         skor_leksikon_filtered = skor_leksikon[valid_indices]
         y_filtered = y[valid_indices]
+        
+        # Menghitung jumlah kelas yang valid secara dinamis (Bug Fix)
+        jumlah_kelas_valid = len(np.unique(y_filtered))
+        st.write(f"📊 Distribusi Setelah Filter (<2 dibuang): {pd.Series(y_filtered).value_counts().to_dict()}")
 
         st.write("✂️ Pemisahan Data Training & Testing (Test Size: 30%)...")
         X_tr_text, X_te_text, lex_tr, lex_te, y_tr, y_te = train_test_split(
@@ -102,10 +106,49 @@ def run_training_process():
         progress_bar.progress(95, text="Tahap 7/8: Evaluasi Akurasi...")
         y_pred = model.predict(X_te_final)
         acc = metrics.accuracy_score(y_te, y_pred)
-        st.write(f"🎯 **Akurasi Model Gabungan (3 Kelas): {acc * 100:.2f}%**")
+        
+        # Tampilan Akurasi Dinamis
+        st.success(f"🎯 **Akurasi Model Gabungan ({jumlah_kelas_valid} Kelas): {acc * 100:.2f}%**")
         
         st.write("📋 **Laporan Metrik:**")
         st.dataframe(pd.DataFrame(metrics.classification_report(y_te, y_pred, output_dict=True)).T.round(3))
+
+        # =====================================================================
+        # MODUL TRANSPARANSI UNTUK DOSEN (WHITE-BOX EXPLANATION)
+        # =====================================================================
+        st.markdown("---")
+        st.markdown("### 🎓 Detail Perhitungan & Step-by-Step (Validasi Dosen)")
+        
+        with st.expander("1. Cleansing, Stopwords & Pelabelan Leksikon", expanded=False):
+            st.write("**Proses NLP Pipeline:** Membersihkan tanda baca (cleansing), menghapus kata tak berbobot (stopwords), dan mengembalikan kata ke bentuk dasar (stemming).")
+            st.latex(r"Skor\_Total = \sum_{i=1}^{n} bobot(kata_i)")
+            st.write("Setiap kata dalam kalimat dicocokkan dengan kamus leksikon. Sistem menjumlahkan bobotnya:")
+            st.markdown("- Jika **Skor > 0** ➔ Positif\n- Jika **Skor < 0** ➔ Negatif\n- Jika **Skor = 0** ➔ Netral")
+            st.write("**Sampel Data & Perhitungan Leksikon:**")
+            st.dataframe(pd.DataFrame({
+                'Teks Bersih': X_text_filtered.head(3).values, 
+                'Skor Leksikon Awal': skor_leksikon_filtered.flatten()[:3],
+                'Label Aktual': y_filtered[:3]
+            }))
+
+        with st.expander("2. TF-IDF & Normalisasi MinMaxScaler", expanded=False):
+            st.write("**A. Ekstraksi Fitur Teks (TF-IDF)**")
+            st.latex(r"w_{i,j} = TF_{i,j} \times \log\left(\frac{N}{DF_i}\right)")
+            st.write(f"Mengubah teks menjadi matriks angka. Saat ini terdapat **{X_tr_tfidf.shape[0]} Dokumen Latih (N)** dan **{X_tr_tfidf.shape[1]} Kosakata Unik**.")
+            
+            st.write("**B. Normalisasi Leksikon**")
+            st.latex(r"X_{norm} = \frac{X - X_{min}}{X_{max} - X_{min}}")
+            st.write("Skor leksikon (bisa bernilai puluhan) diskala ulang menjadi 0.0 hingga 1.0 agar setara dengan nilai TF-IDF sebelum digabungkan *(hstack)*.")
+
+        with st.expander("3. Algoritma Multinomial Naive Bayes", expanded=False):
+            st.write("Algoritma menghitung probabilitas sebuah teks masuk ke kelas tertentu berdasarkan kemunculan fitur-fiturnya (Probabilitas Bersyarat / Teorema Bayes).")
+            st.latex(r"P(Kelas|Teks) \propto P(Kelas) \prod_{i=1}^{n} P(Fitur_i|Kelas)")
+            st.write("**Keterangan:**")
+            st.markdown("- **$P(Kelas)$**: Probabilitas Prior (Distribusi kelas pada data latih).\n- **$P(Fitur_i|Kelas)$**: Likelihood (Peluang kemunculan kata/fitur pada kelas tertentu).\n- Model ini menggunakan *Laplace Smoothing* ($\\alpha = 1$) untuk mencegah probabilitas nol jika ada kata baru di data uji.")
+
+        with st.expander("4. Pemahaman Laporan Metrik (Classification Report)", expanded=False):
+            st.markdown("- **Akurasi**: Persentase total tebakan benar dari seluruh data uji.\n- **Precision**: Fokus meminimalkan *False Positive*. (Dari semua yang ditebak Positif, berapa yang *benar-benar* Positif?).\n- **Recall**: Fokus meminimalkan *False Negative*. (Dari semua data yang *sebenarnya* Positif, berapa persen yang berhasil ditebak model?).\n- **F1-Score**: Nilai rata-rata harmonis dari Precision dan Recall.")
+        # =====================================================================
 
         st.write("💾 Menyimpan Komponen Model...")
         progress_bar.progress(100, text="Tahap 8/8: Menyimpan Model... Selesai!")
@@ -114,9 +157,9 @@ def run_training_process():
         with open(os.path.join(MODEL_DIR, 'naive_bayes_model.pkl'), 'wb') as f: pickle.dump(model, f)
         with open(os.path.join(MODEL_DIR, 'lexicon_dict.pkl'), 'wb') as f: pickle.dump(lexicon, f)
 
-        status.update(label="✅ Selesai! Model 3 Kelas Siap Digunakan.", state="complete", expanded=False)
+        status.update(label=f"✅ Selesai! Model {jumlah_kelas_valid} Kelas Siap Digunakan.", state="complete", expanded=False)
     
-    st.success("🎉 Proses ekstraksi dan pelatihan multikelas berhasil dituntaskan. Modul Prediksi dan Analisis sekarang siap digunakan.")
+    st.success("🎉 Proses ekstraksi dan pelatihan berhasil dituntaskan. Modul Prediksi dan Analisis sekarang siap digunakan.")
 
 def show_training_page():
     # Header yang disesuaikan dengan UI yang profesional
@@ -132,7 +175,7 @@ def show_training_page():
         **Alur yang akan dieksekusi oleh sistem:**
         1. **Pra-pemrosesan Data**: Penerapan teknik *Cleansing*, *Case Folding*, penghapusan *Stopwords*, dan *Stemming* menggunakan pustaka Sastrawi.
         2. **Pendekatan Hibrida (Vektor & Semantik)**: Model menggabungkan **Vektor Statistik (TF-IDF Murni)** dengan **Pengetahuan Semantik (Skor Leksikon)** yang telah dinormalisasi.
-        3. **Klasifikasi Utama**: Mengklasifikasikan data ke dalam **3 Kelas (Positif, Negatif, Netral)** menggunakan algoritma **Multinomial Naive Bayes**.
+        3. **Klasifikasi Utama**: Mengklasifikasikan data menggunakan algoritma **Multinomial Naive Bayes**.
         """)
 
     st.markdown("<br>", unsafe_allow_html=True)
